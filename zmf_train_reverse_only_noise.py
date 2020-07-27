@@ -8,28 +8,26 @@ import numpy as np
 import rawpy
 import glob
 
-input_dir = './dataset/Sony/short/'
-gt_dir = './dataset/Sony/long/'
-checkpoint_dir = './result_Sony/'
-result_dir = './result_Sony/'
+input_dir = '../../../../../media/zhangmf/C14D581BDA18EBFA/data/Sony/Sony/long/'
+gt_dir = '../../../../../media/zhangmf/C14D581BDA18EBFA/data/Sony/Sony/short/'
+checkpoint_dir = '../../workplace/4-learn-dark/converse-noise-result/'
+result_dir = '../../workplace/4-learn-dark/converse-noise-result/'
 
 # get train IDs
-train_fns = glob.glob(gt_dir + '0*.ARW')
+train_fns = glob.glob(input_dir + '0*.ARW')
 train_ids = [int(os.path.basename(train_fn)[0:5]) for train_fn in train_fns]
+print(train_ids)
 
-ps = 512  # patch size for training
-# ps = 1024 # zmf: work on pcl server
+ps = 1024  # patch size for training
 save_freq = 500
 
 DEBUG = 0
 if DEBUG == 1:
     save_freq = 2
-    train_ids = train_ids[0:5]
-
+    train_ids = train_ids[120:140]
 
 def lrelu(x):
     return tf.maximum(x * 0.2, x)
-
 
 def upsample_and_concat(x1, x2, output_channels, in_channels):
     pool_size = 2
@@ -41,8 +39,9 @@ def upsample_and_concat(x1, x2, output_channels, in_channels):
 
     return deconv_output
 
-
 def network(input):
+    # input = tf.space_to_depth(input, 2) # H*W*3 -> H/2*W/2*12
+    # H/2*W/2*4
     conv1 = slim.conv2d(input, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv1_1')
     conv1 = slim.conv2d(conv1, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv1_2')
     pool1 = slim.max_pool2d(conv1, [2, 2], padding='SAME')
@@ -78,10 +77,9 @@ def network(input):
     conv9 = slim.conv2d(up9, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv9_1')
     conv9 = slim.conv2d(conv9, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv9_2')
 
-    conv10 = slim.conv2d(conv9, 12, [1, 1], rate=1, activation_fn=None, scope='g_conv10')
-    out = tf.depth_to_space(conv10, 2)
-    return out
-
+    conv10 = slim.conv2d(conv9, 4, [1, 1], rate=1, activation_fn=None, scope='g_conv10')
+    
+    return conv10 # H/2*W/2*4
 
 def pack_raw(raw):
     # pack Bayer image to 4 channels
@@ -93,19 +91,44 @@ def pack_raw(raw):
     H = img_shape[0]
     W = img_shape[1]
 
-    out = np.concatenate((im[0:H:2, 0:W:2, :],
-                          im[0:H:2, 1:W:2, :],
-                          im[1:H:2, 1:W:2, :],
-                          im[1:H:2, 0:W:2, :]), axis=2)
+    out = np.concatenate((im[0:H:2, 0:W:2, :], # r
+                          im[0:H:2, 1:W:2, :], # g
+                          im[1:H:2, 1:W:2, :], # b
+                          im[1:H:2, 0:W:2, :]), axis=2) # g
     return out
 
+def seeraw(some_patch):
+    # (1, 1024, 1024, 4) -> (1024,1024,3)
+    raw = some_patch[0,:,:,:]
+    H = raw.shape[0]
+    W = raw.shape[1]
+
+    r = raw[:,:,0]
+    g = (raw[:,:,1] + raw[:,:,3])/2.0
+    b = raw[:,:,2]
+
+    seeimg = np.zeros([H,W,3])
+    seeimg[:,:,0] = r
+    seeimg[:,:,1] = g
+    seeimg[:,:,2] = b
+
+    return seeimg
+
+def smallrgb(bigrgb):
+    # (1, 2048, 2048, 3) -> (1024,1024,3)
+    smimg = bigrgb[0,0::2,0::2,:]
+    return smimg
 
 sess = tf.Session()
-in_image = tf.placeholder(tf.float32, [None, None, None, 4])
-gt_image = tf.placeholder(tf.float32, [None, None, None, 3])
-out_image = network(in_image)
+in_noise_zmf = tf.placeholder(tf.float32, [None, None, None, 4])  # simple noise based on bright raw, H/2*W/2*4
+gt_noise_zmf = tf.placeholder(tf.float32, [None, None, None, 4])  # dark raw * ratio - bright raw, H/2*W/2*4
+out_noise_zmf = network(in_noise_zmf) # raw output img, H/2*W/2*4
 
-G_loss = tf.reduce_mean(tf.abs(out_image - gt_image))
+# zmf: 4 image losses
+G_loss = tf.reduce_mean(tf.abs(out_noise_zmf - gt_noise_zmf))
+# G_loss = tf.reduce_mean(tf.square(out_noise_zmf - gt_noise_zmf))
+# G_loss = 1. - tf.image.ssim(out_noise_zmf, gt_noise_zmf, 1.0)
+# G_loss = 1. - tf.image.ssim_multiscale(out_noise_zmf, gt_noise_zmf , 1.0)
 
 t_vars = tf.trainable_variables()
 lr = tf.placeholder(tf.float32)
@@ -119,11 +142,11 @@ if ckpt:
     saver.restore(sess, ckpt.model_checkpoint_path)
 
 # Raw data takes long time to load. Keep them in memory after loaded.
-gt_images = [None] * 6000
-input_images = {}
-input_images['300'] = [None] * len(train_ids)
-input_images['250'] = [None] * len(train_ids)
-input_images['100'] = [None] * len(train_ids)
+clean_raws = [None] * 6000
+noisy_raws = {}
+noisy_raws['300'] = [None] * len(train_ids)
+noisy_raws['250'] = [None] * len(train_ids)
+noisy_raws['100'] = [None] * len(train_ids)
 
 g_loss = np.zeros((5000, 1))
 
@@ -139,40 +162,52 @@ for epoch in range(lastepoch, 4001):
     cnt = 0
     if epoch > 2000:
         learning_rate = 1e-5
+    et = time.time()
 
     for ind in np.random.permutation(len(train_ids)):
         # get the path from image id
         train_id = train_ids[ind]
-        in_files = glob.glob(input_dir + '%05d_00*.ARW' % train_id)
-        in_path = in_files[np.random.random_integers(0, len(in_files) - 1)]
-        in_fn = os.path.basename(in_path)
+        clean_files = glob.glob(input_dir + '%05d_00*.ARW' % train_id)
+        clean_path = clean_files[0] # only one 
+        clean_fn = os.path.basename(clean_path)
+        # print(clean_fn)
 
-        gt_files = glob.glob(gt_dir + '%05d_00*.ARW' % train_id)
-        gt_path = gt_files[0]
-        gt_fn = os.path.basename(gt_path)
-        in_exposure = float(in_fn[9:-5])
-        gt_exposure = float(gt_fn[9:-5])
-        ratio = min(gt_exposure / in_exposure, 300)
+        noisy_files = glob.glob(gt_dir + '%05d_00*.ARW' % train_id)
+        noisy_path = noisy_files[np.random.randint(0, len(noisy_files))] # 0.1 and 0.04 and sometimes 0.033, pick one
+        noisy_fn = os.path.basename(noisy_path)
+
+
+
+        bright_exposure = float(clean_fn[9:-5])
+        dark_exposure = float(noisy_fn[9:-5])
+        ratio = min(bright_exposure / dark_exposure, 300)
 
         st = time.time()
         cnt += 1
 
-        if input_images[str(ratio)[0:3]][ind] is None:
-            raw = rawpy.imread(in_path)
-            input_images[str(ratio)[0:3]][ind] = np.expand_dims(pack_raw(raw), axis=0) * ratio
+        if noisy_raws[str(ratio)[0:3]][ind] is None:
+            clean_raw = rawpy.imread(clean_path)
+            clean_raws[ind] = np.expand_dims(pack_raw(clean_raw), axis=0)
+            # print(clean_raws[ind].shape) # (1, 2848, 4256, 3)
 
-            gt_raw = rawpy.imread(gt_path)
-            im = gt_raw.postprocess(use_camera_wb=True, half_size=False, no_auto_bright=True, output_bps=16)
-            gt_images[ind] = np.expand_dims(np.float32(im / 65535.0), axis=0)
+            noisy_raw = rawpy.imread(noisy_path)
+            noisy_raws[str(ratio)[0:3]][ind] = np.expand_dims(pack_raw(noisy_raw), axis=0) * ratio
+            # print(noisy_raws[str(ratio)[0:3]][ind].shape) # (1, 1424, 2128, 4)
+            # print("ratio = " + str(ratio))
 
         # crop
-        H = input_images[str(ratio)[0:3]][ind].shape[1]
-        W = input_images[str(ratio)[0:3]][ind].shape[2]
+        H = noisy_raws[str(ratio)[0:3]][ind].shape[1] # H/2
+        W = noisy_raws[str(ratio)[0:3]][ind].shape[2] # W/2
 
         xx = np.random.randint(0, W - ps)
         yy = np.random.randint(0, H - ps)
-        input_patch = input_images[str(ratio)[0:3]][ind][:, yy:yy + ps, xx:xx + ps, :]
-        gt_patch = gt_images[ind][:, yy * 2:yy * 2 + ps * 2, xx * 2:xx * 2 + ps * 2, :]
+        noisy_patch = noisy_raws[str(ratio)[0:3]][ind][:, yy:yy + ps, xx:xx + ps, :]
+        clean_patch = clean_raws[ind][:, yy:yy + ps, xx:xx + ps, :]
+        gt_patch = noisy_patch - clean_patch
+        a = 0.1
+        b = 0.1
+        input_patch =  np.random.normal(0,a*clean_patch+b)
+        # print(gt_patch.shape, input_patch.shape) # (1, 1024, 1024, 4) (1, 1024, 1024, 4)
 
         if np.random.randint(2, size=1)[0] == 1:  # random flip
             input_patch = np.flip(input_patch, axis=1)
@@ -184,20 +219,22 @@ for epoch in range(lastepoch, 4001):
             input_patch = np.transpose(input_patch, (0, 2, 1, 3))
             gt_patch = np.transpose(gt_patch, (0, 2, 1, 3))
 
-        input_patch = np.minimum(input_patch, 1.0)
+        gt_patch = np.maximum(np.minimum(gt_patch*3.0, 1.0),0.0)
+        input_patch = np.maximum(np.minimum(input_patch*3.0, 1.0),0.0)
+        # scipy.misc.toimage(seeraw(gt_patch) * 255, high=255, low=0, cmin=0, cmax=255).save(result_dir + 'try.jpg')
 
-        _, G_current, output = sess.run([G_opt, G_loss, out_image],
-                                        feed_dict={in_image: input_patch, gt_image: gt_patch, lr: learning_rate})
+        _, G_current, output = sess.run([G_opt, G_loss, out_noise_zmf],
+                                        feed_dict={in_noise_zmf: input_patch, gt_noise_zmf: gt_patch, lr: learning_rate})
         output = np.minimum(np.maximum(output, 0), 1)
         g_loss[ind] = G_current
 
-        print("%d %d Loss=%.3f Time=%.3f" % (epoch, cnt, np.mean(g_loss[np.where(g_loss)]), time.time() - st))
+        print("%d %d Loss=%.3f Time=%.3f,%.3f" % (epoch, cnt, np.mean(g_loss[np.where(g_loss)]), time.time() - st, time.time() - et))
 
         if epoch % save_freq == 0:
             if not os.path.isdir(result_dir + '%04d' % epoch):
                 os.makedirs(result_dir + '%04d' % epoch)
 
-            temp = np.concatenate((gt_patch[0, :, :, :], output[0, :, :, :]), axis=1)
+            temp = np.concatenate((seeraw(noisy_patch),seeraw(clean_patch),seeraw(gt_patch),seeraw(output),seeraw(input_patch),seeraw(output+clean_patch)), axis=1)
             scipy.misc.toimage(temp * 255, high=255, low=0, cmin=0, cmax=255).save(
                 result_dir + '%04d/%05d_00_train_%d.jpg' % (epoch, train_id, ratio))
 

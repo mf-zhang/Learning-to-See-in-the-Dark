@@ -1,3 +1,10 @@
+## zmf change
+
+zmf_eg_tf_space_to_depth.py - see how this function works
+zmf_train_reverse.py - use bright as input, dark as GT, to learn dark features with 4 loss functions (no noise in the result)
+zmf_train_reverse_only_noise.py - use random noise as input, dark*scale-bright as GT (still no noise)
+zmf_train_bit_noise_sony.py - synthesize bit noise on sony bright images as input, use bright as GT, can not reproduce paper result
+
 # Learning-to-See-in-the-Dark
 
 This is a Tensorflow implementation of Learning to See in the Dark in CVPR 2018, by [Chen Chen](http://cchen156.github.io/), [Qifeng Chen](http://cqf.io/), [Jia Xu](http://pages.cs.wisc.edu/~jiaxu/), and [Vladlen Koltun](http://vladlen.info/).  

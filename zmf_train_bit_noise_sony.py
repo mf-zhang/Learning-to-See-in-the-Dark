@@ -1,5 +1,9 @@
 # uniform content loss + adaptive threshold + per_class_input + recursive G
 # improvement upon cqf37
+
+# Use learning to see in the dark CNN
+# test BIT Fu Ying noise model, who claims that synthetic noise can outperform real noise
+
 from __future__ import division
 import os, time, scipy.io
 import tensorflow as tf
@@ -7,25 +11,75 @@ import tensorflow.contrib.slim as slim
 import numpy as np
 import rawpy
 import glob
-
-input_dir = './dataset/Sony/short/'
-gt_dir = './dataset/Sony/long/'
-checkpoint_dir = './result_Sony/'
-result_dir = './result_Sony/'
+gt_dir = '../../data/dataset/learnDark/Sony/Sony/long/'
+checkpoint_dir = '../../workplace/sid_bit_test/'
+result_dir = '../../workplace/sid_bit_test/'
 
 # get train IDs
 train_fns = glob.glob(gt_dir + '0*.ARW')
 train_ids = [int(os.path.basename(train_fn)[0:5]) for train_fn in train_fns]
 
 ps = 512  # patch size for training
-# ps = 1024 # zmf: work on pcl server
-save_freq = 500
+save_freq = 50
 
 DEBUG = 0
 if DEBUG == 1:
     save_freq = 2
     train_ids = train_ids[0:5]
 
+
+def seeraw(some_patch):
+    # (1,1024,1024,4) -> (1024,1024,3)
+    raw = some_patch[0,:,:,:]
+    H = raw.shape[0]
+    W = raw.shape[1]
+
+    r = raw[:,:,0]
+    g = (raw[:,:,1]+raw[:,:,3])/2.
+    b = raw[:,:,2]
+
+    seeimg = np.zeros([H,W,3])
+    seeimg[:,:,0] = r
+    seeimg[:,:,1] = g
+    seeimg[:,:,2] = b
+
+    return seeimg
+
+def add_noise(img):
+    im01 = img
+    import zmf
+    import math
+    # 1_Poisson
+    logK = zmf.uniform(0.8,2.6)
+    K = math.exp(logK)
+    # print("POISSON: K =",K)
+    noise_1 = (zmf.poisson(im01*255,im01.shape)-im01*255) / 255. * K
+    # zmf.imshow(noise_1+im01)
+
+    # 2_Tukey_Lambda
+    lam = -0.06
+    mean = 0.
+    logscale = (5./6.) * logK + (0.6-5./6.*1.4) + zmf.uniform(-0.05,0.05)
+    scale = math.exp(logscale)
+    # print("TL: lam = -0.26, mean = 0, scale =",scale)
+    noise_2 = zmf.tukeylambda(lam,mean,scale/20.,im01.shape) # divide by 20 is not in the paper, but if not, the result noise is too strong
+    # zmf.imshow(noise_1 + noise_2 + im01)
+
+    # 3_Row
+    noise_3 = np.zeros(im01.shape)
+    for rgbg in range(noise_3.shape[3]):
+        for row in range(noise_3.shape[1]):
+            logdev = 0.75 * logK - 2.2 + zmf.uniform(-0.375,0.375)
+            dev = math.exp(logdev)
+            row_shift = zmf.normal(0,dev)
+            # print(row_shift)
+            noise_3[:,row,:,rgbg] = row_shift/10. # divide by 10 is not in the paper, but if not, the result noise is too strong
+
+    # show
+    # print(logK, logscale)
+    # print(logK, logdev)
+    # zmf.imshow(noise_1 + noise_2 + noise_3 + im01)
+    return noise_1 + noise_2 + noise_3 + im01
 
 def lrelu(x):
     return tf.maximum(x * 0.2, x)
@@ -99,7 +153,6 @@ def pack_raw(raw):
                           im[1:H:2, 0:W:2, :]), axis=2)
     return out
 
-
 sess = tf.Session()
 in_image = tf.placeholder(tf.float32, [None, None, None, 4])
 gt_image = tf.placeholder(tf.float32, [None, None, None, 3])
@@ -139,39 +192,43 @@ for epoch in range(lastepoch, 4001):
     cnt = 0
     if epoch > 2000:
         learning_rate = 1e-5
-
     for ind in np.random.permutation(len(train_ids)):
         # get the path from image id
         train_id = train_ids[ind]
-        in_files = glob.glob(input_dir + '%05d_00*.ARW' % train_id)
-        in_path = in_files[np.random.random_integers(0, len(in_files) - 1)]
+        in_files = glob.glob(gt_dir + '%05d_00*.ARW' % train_id)
+        in_path = in_files[0]
         in_fn = os.path.basename(in_path)
 
         gt_files = glob.glob(gt_dir + '%05d_00*.ARW' % train_id)
         gt_path = gt_files[0]
         gt_fn = os.path.basename(gt_path)
-        in_exposure = float(in_fn[9:-5])
-        gt_exposure = float(gt_fn[9:-5])
-        ratio = min(gt_exposure / in_exposure, 300)
+        # in_exposure = float(in_fn[9:-5])
+        # gt_exposure = float(gt_fn[9:-5])
+        ratio = 1. #min(gt_exposure / in_exposure, 300)
 
         st = time.time()
         cnt += 1
 
-        if input_images[str(ratio)[0:3]][ind] is None:
-            raw = rawpy.imread(in_path)
-            input_images[str(ratio)[0:3]][ind] = np.expand_dims(pack_raw(raw), axis=0) * ratio
-
+        if input_images['300'][ind] is None:
             gt_raw = rawpy.imread(gt_path)
+            orig_im = np.expand_dims(pack_raw(gt_raw), axis=0)
+            # add noise
+            noisy_im = add_noise(orig_im)
+            # print(noisy_im.shape) (1,1424,2128,4)
+            # print(np.mean(noisy_im)) 0.23
+            # done
+            input_images['300'][ind] = noisy_im
+
             im = gt_raw.postprocess(use_camera_wb=True, half_size=False, no_auto_bright=True, output_bps=16)
             gt_images[ind] = np.expand_dims(np.float32(im / 65535.0), axis=0)
 
         # crop
-        H = input_images[str(ratio)[0:3]][ind].shape[1]
-        W = input_images[str(ratio)[0:3]][ind].shape[2]
+        H = input_images['300'][ind].shape[1]
+        W = input_images['300'][ind].shape[2]
 
         xx = np.random.randint(0, W - ps)
         yy = np.random.randint(0, H - ps)
-        input_patch = input_images[str(ratio)[0:3]][ind][:, yy:yy + ps, xx:xx + ps, :]
+        input_patch = input_images['300'][ind][:, yy:yy + ps, xx:xx + ps, :]
         gt_patch = gt_images[ind][:, yy * 2:yy * 2 + ps * 2, xx * 2:xx * 2 + ps * 2, :]
 
         if np.random.randint(2, size=1)[0] == 1:  # random flip
@@ -196,9 +253,11 @@ for epoch in range(lastepoch, 4001):
         if epoch % save_freq == 0:
             if not os.path.isdir(result_dir + '%04d' % epoch):
                 os.makedirs(result_dir + '%04d' % epoch)
-
-            temp = np.concatenate((gt_patch[0, :, :, :], output[0, :, :, :]), axis=1)
+            input2 = np.concatenate((seeraw(input_patch),seeraw(input_patch)),axis=0)
+            #print(input2.shape)
+            #print(gt_patch[0,:,:,:].shape)
+            temp = np.concatenate((input2,gt_patch[0, :, :, :], output[0, :, :, :]), axis=1)
             scipy.misc.toimage(temp * 255, high=255, low=0, cmin=0, cmax=255).save(
-                result_dir + '%04d/%05d_00_train_%d.jpg' % (epoch, train_id, ratio))
+                result_dir + '%04d/%05d_00_train_input_gt_output.jpg' % (epoch, train_id))
 
     saver.save(sess, checkpoint_dir + 'model.ckpt')
