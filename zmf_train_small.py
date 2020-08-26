@@ -21,7 +21,7 @@ ps = 512  # patch size for training
 # ps = 1024 # zmf: work on pcl server
 save_freq = 500
 
-DEBUG = 1
+DEBUG = 0
 if DEBUG == 1:
     save_freq = 2
     train_ids = train_ids[0:5]
@@ -57,29 +57,21 @@ def network(input):
 
     conv4 = slim.conv2d(pool3, 256, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv4_1')
     conv4 = slim.conv2d(conv4, 256, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv4_2')
-    pool4 = slim.max_pool2d(conv4, [2, 2], padding='SAME')
 
-    conv5 = slim.conv2d(pool4, 512, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv5_1')
-    conv5 = slim.conv2d(conv5, 512, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv5_2')
+    up5 = upsample_and_concat(conv4, conv3, 128, 256)
+    conv5 = slim.conv2d(up5, 128, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv5_1')
+    conv5 = slim.conv2d(conv5, 128, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv5_2')
 
-    up6 = upsample_and_concat(conv5, conv4, 256, 512)
-    conv6 = slim.conv2d(up6, 256, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv6_1')
-    conv6 = slim.conv2d(conv6, 256, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv6_2')
+    up6 = upsample_and_concat(conv5, conv2, 64, 128)
+    conv6 = slim.conv2d(up6, 64, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv6_1')
+    conv6 = slim.conv2d(conv6, 64, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv6_2')
 
-    up7 = upsample_and_concat(conv6, conv3, 128, 256)
-    conv7 = slim.conv2d(up7, 128, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv7_1')
-    conv7 = slim.conv2d(conv7, 128, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv7_2')
+    up7 = upsample_and_concat(conv6, conv1, 32, 64)
+    conv7 = slim.conv2d(up7, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv7_1')
+    conv7 = slim.conv2d(conv7, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv7_2')
 
-    up8 = upsample_and_concat(conv7, conv2, 64, 128)
-    conv8 = slim.conv2d(up8, 64, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv8_1')
-    conv8 = slim.conv2d(conv8, 64, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv8_2')
-
-    up9 = upsample_and_concat(conv8, conv1, 32, 64)
-    conv9 = slim.conv2d(up9, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv9_1')
-    conv9 = slim.conv2d(conv9, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv9_2')
-
-    conv10 = slim.conv2d(conv9, 12, [1, 1], rate=1, activation_fn=None, scope='g_conv10')
-    out = tf.depth_to_space(conv10, 2)
+    conv8 = slim.conv2d(conv7, 12, [1, 1], rate=1, activation_fn=None, scope='g_conv8')
+    out = tf.depth_to_space(conv8, 2)
     return out
 
 
