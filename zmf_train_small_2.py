@@ -8,10 +8,10 @@ import numpy as np
 import rawpy
 import glob
 
-input_dir = './dataset/Sony/short/'
-gt_dir = './dataset/Sony/long/'
-checkpoint_dir = './result_Sony/'
-result_dir = './result_Sony/'
+input_dir = '../../data/dataset/learnDark/Sony/Sony/short/'
+gt_dir = '../../data/dataset/learnDark/Sony/Sony/short/'
+checkpoint_dir = '../../workplace/sidsmall/'
+result_dir = '../../workplace/sidsmall/'
 
 # get train IDs
 train_fns = glob.glob(gt_dir + '0*.ARW')
@@ -21,7 +21,7 @@ ps = 512  # patch size for training
 # ps = 1024 # zmf: work on pcl server
 save_freq = 500
 
-DEBUG = 0
+DEBUG = 1
 if DEBUG == 1:
     save_freq = 2
     train_ids = train_ids[0:5]

@@ -8,10 +8,10 @@ import numpy as np
 import rawpy
 import glob
 
-input_dir = '../../data/dataset/SID/Sony/Sony/short/'
-gt_dir = '../../data/dataset/SID/Sony/Sony/long/'
-checkpoint_dir = '../../workplace/todelete/sidsmall/'
-result_dir = '../../workplace/todelete/sidsmall/'
+input_dir = '../../data/dataset/learnDark/Sony/Sony/short/'
+gt_dir = '../../data/dataset/learnDark/Sony/Sony/long/'
+checkpoint_dir = '../../workplace/sidsmall/'
+result_dir = '../../workplace/sidsmall/'
 
 # get train IDs
 train_fns = glob.glob(gt_dir + '0*.ARW')

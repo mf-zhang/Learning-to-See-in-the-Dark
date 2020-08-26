@@ -8,10 +8,10 @@ import numpy as np
 import rawpy
 import glob
 
-input_dir = '../../data/dataset/SID/Sony/Sony/short/'
-gt_dir = '../../data/dataset/SID/Sony/Sony/long/'
-checkpoint_dir = '../../workplace/todelete/sidsmall/'
-result_dir = '../../workplace/todelete/sidsmall/'
+input_dir = '../../data/dataset/learnDark/Sony/Sony/short/'
+gt_dir = '../../data/dataset/learnDark/Sony/Sony/long/'
+checkpoint_dir = '../../workplace/sidsmall/'
+result_dir = '../../workplace/sidsmall/'
 
 # get train IDs
 train_fns = glob.glob(gt_dir + '0*.ARW')
@@ -21,7 +21,7 @@ ps = 512  # patch size for training
 # ps = 1024 # zmf: work on pcl server
 save_freq = 500
 
-DEBUG = 0
+DEBUG = 1
 if DEBUG == 1:
     save_freq = 2
     train_ids = train_ids[0:5]
@@ -44,31 +44,31 @@ def upsample_and_concat(x1, x2, output_channels, in_channels):
 
 def network(input):
     conv1 = slim.conv2d(input, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv1_1')
-    conv1 = slim.conv2d(conv1, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv1_2')
+    # conv1 = slim.conv2d(conv1, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv1_2')
     pool1 = slim.max_pool2d(conv1, [2, 2], padding='SAME')
 
     conv2 = slim.conv2d(pool1, 64, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv2_1')
-    conv2 = slim.conv2d(conv2, 64, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv2_2')
+    # conv2 = slim.conv2d(conv2, 64, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv2_2')
     pool2 = slim.max_pool2d(conv2, [2, 2], padding='SAME')
 
     conv3 = slim.conv2d(pool2, 128, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv3_1')
-    conv3 = slim.conv2d(conv3, 128, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv3_2')
+    # conv3 = slim.conv2d(conv3, 128, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv3_2')
     pool3 = slim.max_pool2d(conv3, [2, 2], padding='SAME')
 
     conv4 = slim.conv2d(pool3, 256, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv4_1')
-    conv4 = slim.conv2d(conv4, 256, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv4_2')
+    # conv4 = slim.conv2d(conv4, 256, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv4_2')
 
     up5 = upsample_and_concat(conv4, conv3, 128, 256)
     conv5 = slim.conv2d(up5, 128, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv5_1')
-    conv5 = slim.conv2d(conv5, 128, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv5_2')
+    # conv5 = slim.conv2d(conv5, 128, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv5_2')
 
     up6 = upsample_and_concat(conv5, conv2, 64, 128)
     conv6 = slim.conv2d(up6, 64, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv6_1')
-    conv6 = slim.conv2d(conv6, 64, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv6_2')
+    # conv6 = slim.conv2d(conv6, 64, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv6_2')
 
     up7 = upsample_and_concat(conv6, conv1, 32, 64)
     conv7 = slim.conv2d(up7, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv7_1')
-    conv7 = slim.conv2d(conv7, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv7_2')
+    # conv7 = slim.conv2d(conv7, 32, [3, 3], rate=1, activation_fn=lrelu, scope='g_conv7_2')
 
     conv8 = slim.conv2d(conv7, 12, [1, 1], rate=1, activation_fn=None, scope='g_conv8')
     out = tf.depth_to_space(conv8, 2)
@@ -93,7 +93,7 @@ def pack_raw(raw):
 
 
 sess = tf.Session()
-in_image = tf.placeholder(tf.float32, [None, None, None, 4])
+in_image = tf.placeholder(tf.float32, [None, None, None, 3])
 gt_image = tf.placeholder(tf.float32, [None, None, None, 3])
 out_image = network(in_image)
 
@@ -179,7 +179,8 @@ for epoch in range(lastepoch, 4001):
         input_patch = np.minimum(input_patch, 1.0)
 
         _, G_current, output = sess.run([G_opt, G_loss, out_image],
-                                        feed_dict={in_image: input_patch, gt_image: gt_patch, lr: learning_rate})
+                                        feed_dict={in_image:
+                                                   input_patch[:,:,:,0:3], gt_image: gt_patch, lr: learning_rate})
         output = np.minimum(np.maximum(output, 0), 1)
         g_loss[ind] = G_current
 
